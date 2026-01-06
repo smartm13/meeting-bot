@@ -289,6 +289,25 @@ export class GoogleMeetBot extends MeetBotBase {
                         }
                       }
 
+                      // Fallback: Check for text that indicates we're in the call
+                      const bodyText = document.body.innerText;
+                      if (bodyText.includes('You have joined the call') ||
+                          bodyText.includes('other person in the call') ||
+                          bodyText.includes('people in the call')) {
+                        return true;
+                      }
+
+                      // Fallback: Check for Leave call button which indicates we're in a call
+                      const leaveCallButton = document.querySelector('button[aria-label="Leave call"]');
+                      if (leaveCallButton) {
+                        // If we have Leave call button AND no lobby mode text, we're likely in the call
+                        const hasLobbyText = bodyText.includes('Asking to join') ||
+                                            bodyText.includes('You\'re the only one here');
+                        if (!hasLobbyText) {
+                          return true;
+                        }
+                      }
+
                       return false;
                     } catch (e) {
                       return false;
