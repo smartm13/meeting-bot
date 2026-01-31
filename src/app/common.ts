@@ -2,6 +2,7 @@ import { Logger } from 'winston';
 import { KnownError, WaitingAtLobbyRetryError } from '../error';
 import { getErrorType } from '../util/logger';
 import config from '../config';
+import { WebinarRegistrationDetails } from '../types';
 
 export interface MeetingJoinParams {
   url: string;
@@ -12,6 +13,7 @@ export interface MeetingJoinParams {
   timezone: string;
   botId?: string;
   eventId?: string;
+  webinarRegistration?: WebinarRegistrationDetails;
 }
 
 export interface MeetingJoinRedisParams extends MeetingJoinParams {

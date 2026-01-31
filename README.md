@@ -115,7 +115,13 @@ Content-Type: application/json
   "teamId": "team123",
   "timezone": "UTC",
   "userId": "user123",
-  "botId": "UUID"
+  "botId": "UUID",
+  "webinarRegistration": {
+    "firstName": "Raju",
+    "lastName": "Rakesh",
+    "email": "raju@myapp.co",
+    "phone": "+91..."
+  }
 }
 ```
 
@@ -235,6 +241,12 @@ interface MeetingJoinRedisParams {
   timezone: string;
   botId?: string;
   eventId?: string;
+  webinarRegistration?: {
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+    phone?: string;
+  };
   provider: 'google' | 'microsoft' | 'zoom';  // Required for Redis
 }
 ```
@@ -334,6 +346,41 @@ Meeting Bot automatically uploads the meeting recording to object storage when a
 - **MinIO** - Self-hosted S3-compatible object storage
 - **Other S3-compatible services** - Any service that implements the S3 API
 - **Azure Blob Storage** - Native Azure object storage
+
+### YouTube Live Streaming
+
+Meeting Bot can stream 2-second recording segments directly to YouTube Live over RTMP as they are captured. You can run this in YouTube-only mode (no object storage) or alongside S3/Azure uploads.
+
+#### Enable YouTube Live
+
+```bash
+# Stream-only (no object storage upload)
+UPLOADER_TYPE=youtube
+YOUTUBE_LIVE_STREAM_KEY=your-stream-key
+
+# Or stream alongside object storage uploads
+UPLOADER_TYPE=s3
+YOUTUBE_LIVE_ENABLED=true
+YOUTUBE_LIVE_STREAM_KEY=your-stream-key
+```
+
+Optional:
+
+- `YOUTUBE_LIVE_RTMP_URL` — Full RTMP ingest URL. If set, it overrides `YOUTUBE_LIVE_STREAM_KEY`.
+- `YOUTUBE_LIVE_FFMPEG_PATH` — Path to ffmpeg (defaults to `ffmpeg` on PATH).
+
+#### How to Get a YouTube Live Stream Key
+
+1. Sign in to YouTube Studio: https://studio.youtube.com/
+2. In the left sidebar, click **Go Live**.
+3. Under **Stream settings**, choose **Stream**.
+4. Create or select a stream, then copy the **Stream key**.
+5. Set `YOUTUBE_LIVE_STREAM_KEY` in your `.env` file (or use the full RTMP URL via `YOUTUBE_LIVE_RTMP_URL`).
+
+Notes:
+
+- YouTube may require a one-time live streaming enablement and a short activation delay (up to 24 hours) on new accounts.
+- Use the default RTMP endpoint `rtmp://a.rtmp.youtube.com/live2/<stream-key>` if you only have the stream key.
 
 #### Storage Provider Selection
 

@@ -1,4 +1,4 @@
-import { Frame, Page } from 'playwright';
+import { Frame, Page, Locator } from 'playwright';
 import { JoinParams, AbstractMeetBot } from './AbstractMeetBot';
 import { BotStatus, WaitPromise } from '../types';
 import config from '../config';
@@ -37,7 +37,8 @@ export class ZoomBot extends BotBase {
 
   // TODO use base class for shared functions such as bot status and bot logging
   // TODO Lift the JoinParams to the constructor argument
-  async join({ url, name, bearerToken, teamId, timezone, userId, eventId, botId, uploader }: JoinParams): Promise<void> {
+  async join(params: JoinParams): Promise<void> {
+    const { bearerToken, teamId, userId, eventId, botId, uploader } = params;
     const _state: BotStatus[] = ['processing'];
 
     const handleUpload = async () => {
@@ -48,7 +49,7 @@ export class ZoomBot extends BotBase {
     
     try {
       const pushState = (st: BotStatus) => _state.push(st);
-      await this.joinMeeting({ url, name, bearerToken, teamId, timezone, userId, eventId, botId, pushState, uploader });
+      await this.joinMeeting({ ...params, pushState });
       await patchBotStatus({ botId, eventId, provider: 'zoom', status: _state, token: bearerToken }, this._logger);
 
       // Finish the upload from the temp video
@@ -65,6 +66,123 @@ export class ZoomBot extends BotBase {
 
       throw error;
     }
+  }
+
+  private async findVisibleInput(selectors: string[]): Promise<Locator | null> {
+    const locator = this.page.locator(selectors.join(','));
+    const count = await locator.count();
+    for (let i = 0; i < count; i += 1) {
+      const candidate = locator.nth(i);
+      const isVisible = await candidate.isVisible().catch(() => false);
+      if (isVisible) return candidate;
+    }
+    return null;
+  }
+
+  private buildWebinarRegistrationDetails(params: JoinParams) {
+    const registration = params.webinarRegistration ?? {};
+    let { firstName, lastName } = registration;
+    const { email, phone } = registration;
+
+    if (!firstName || !lastName) {
+      const tokens = (params.name ?? '').trim().split(/\s+/).filter(Boolean);
+      if (!firstName && tokens.length > 0) {
+        firstName = tokens[0];
+      }
+      if (!lastName && tokens.length > 1) {
+        lastName = tokens.slice(1).join(' ');
+      }
+    }
+
+    return { firstName, lastName, email, phone };
+  }
+
+  private async clickWebinarRegisterButton(): Promise<boolean> {
+    this._logger.info('[ZoomBot] Webinar registration info filled; now clicking the register button.');
+    const registerButton = this.page.getByRole('button', { name: /Register/i }).first();
+    if (await registerButton.isVisible().catch(() => false)) {
+      this._logger.info(`[ZoomBot] Found webinar registration button: ${await registerButton.textContent() ?? '[unknown name]'}`);
+      await registerButton.click({ timeout: 60000 });
+      this._logger.info(`[ZoomBot] Clicked webinar registration button: ${await registerButton.textContent() ?? '[unknown name]'}`);
+      return true;
+    }
+
+    const submitButton = this.page.locator('input[type="submit"][value*="Register"]').first();
+    if (await submitButton.isVisible().catch(() => false)) {
+      await submitButton.click({ timeout: 60000 });
+      return true;
+    }
+
+    return false;
+  }
+
+  private async tryCompleteWebinarRegistration(params: JoinParams): Promise<boolean> {
+    const firstNameInput = await this.findVisibleInput([
+      'input#question_first_name',
+      'input[name="question_first_name"]',
+      'input[name="first_name"]',
+      'input#first_name',
+      'input[aria-label*="First Name"]',
+      'input[placeholder*="First Name"]',
+    ]);
+    const lastNameInput = await this.findVisibleInput([
+      'input#question_last_name',
+      'input[name="question_last_name"]',
+      'input[name="last_name"]',
+      'input#last_name',
+      'input[aria-label*="Last Name"]',
+      'input[placeholder*="Last Name"]',
+    ]);
+    const emailInput = await this.findVisibleInput([
+      'input#question_email',
+      'input[name="question_email"]',
+      'input[name="email"]',
+      'input#email',
+      'input[type="email"]',
+      'input[aria-label*="Email"]',
+      'input[placeholder*="Email"]',
+    ]);
+    const phoneInput = await this.findVisibleInput([
+      'input#question_phone',
+      'input[name="question_phone"]',
+      'input[name="phone"]',
+      'input#phone',
+      'input[type="tel"]',
+      'input[aria-label*="Phone"]',
+      'input[placeholder*="Phone"]',
+    ]);
+
+    const hasRegistrationForm = Boolean(firstNameInput || lastNameInput || emailInput);
+    if (!hasRegistrationForm) return false;
+
+    this._logger.info('Webinar registration form detected', { userId: params.userId, botId: params.botId });
+
+    const details = this.buildWebinarRegistrationDetails(params);
+    const missing: string[] = [];
+    if (firstNameInput && !details.firstName) missing.push('firstName');
+    if (lastNameInput && !details.lastName) missing.push('lastName');
+    if (emailInput && !details.email) missing.push('email');
+    if (phoneInput && !details.phone) missing.push('phone');
+
+    if (missing.length > 0) {
+      this._logger.error('Missing webinar registration details', { missing, userId: params.userId, botId: params.botId });
+      throw new Error(`Missing webinar registration details: ${missing.join(', ')}`);
+    }
+
+    if (firstNameInput && details.firstName) await firstNameInput.fill(details.firstName);
+    if (lastNameInput && details.lastName) await lastNameInput.fill(details.lastName);
+    if (emailInput && details.email) await emailInput.fill(details.email);
+    if (phoneInput && details.phone) await phoneInput.fill(details.phone);
+
+    const submitted = await this.clickWebinarRegisterButton();
+    if (!submitted) {
+      this._logger.warn('Unable to find webinar registration submit button', { userId: params.userId, botId: params.botId });
+      return false;
+    }
+
+    await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => undefined);
+    this._logger.info('Webinar registration submitted', { userId: params.userId, botId: params.botId });
+    return true;
   }
 
   private async joinMeeting({ pushState, ...params }: JoinParams & { pushState(state: BotStatus): void }): Promise<void> {
@@ -99,6 +217,8 @@ export class ZoomBot extends BotBase {
 
     const hasFocus = await this.page.evaluate(() => document.hasFocus());
     this._logger.info(`Page focus status: ${hasFocus}`);
+
+    await this.tryCompleteWebinarRegistration(params);
 
     const attempts = 3;
     let usingDirectWebClient = false;
@@ -223,6 +343,11 @@ export class ZoomBot extends BotBase {
         await uploadDebugImage(await this.page.screenshot({ type: 'png', fullPage: true }), 'direct-access-webclient', params.userId, this._logger, params.botId);
         throw new Error('Unable to join meeting after trying to access the web client by /wc/join/');
       }
+      this._logger.info('Trying to complete webinar registration .. if it is a webinar');
+      if (await this.tryCompleteWebinarRegistration(params)) {
+        this._logger.info('Webinar registration completed successfully');
+        await this.page.waitForTimeout(30000);
+      }  
     }
 
     this._logger.info('Heading to the web client...', { usingDirectWebClient });

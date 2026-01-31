@@ -1,4 +1,5 @@
 import { IUploader } from '../middleware/disk-uploader';
+import { WebinarRegistrationDetails } from '../types';
 
 export interface BotLaunchParams {
   provider: 'google' | 'microsoft' | 'zoom';
@@ -21,6 +22,7 @@ export interface JoinParams {
   userId: string;
   botId?: string;
   eventId?: string;
+  webinarRegistration?: WebinarRegistrationDetails;
   uploader: IUploader;
 }
 

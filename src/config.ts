@@ -83,6 +83,10 @@ export default {
   notifyRedisList: process.env.NOTIFY_REDIS_LIST ?? 'jobs:meetbot:recordings',
   uploaderFileExtension: process.env.UPLOADER_FILE_EXTENSION ? process.env.UPLOADER_FILE_EXTENSION : '.webm',
   isRedisEnabled: process.env.REDIS_CONSUMER_ENABLED === 'true',
+  youtubeLiveEnabled: process.env.YOUTUBE_LIVE_ENABLED === 'true',
+  youtubeLiveRtmpUrl: process.env.YOUTUBE_LIVE_RTMP_URL,
+  youtubeLiveStreamKey: process.env.YOUTUBE_LIVE_STREAM_KEY,
+  youtubeLiveFfmpegPath: process.env.YOUTUBE_LIVE_FFMPEG_PATH,
   s3CompatibleStorage: {
     endpoint: process.env.S3_ENDPOINT,
     region: process.env.S3_REGION,

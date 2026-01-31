@@ -67,6 +67,13 @@ export interface ShareDetails {
   permissions?: SharePermission[];
 }
 
+export interface WebinarRegistrationDetails {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+}
+
 export interface FileType extends FileSystemEntityType {
   type: 'File';
   description?: string;
@@ -197,4 +204,4 @@ export const logCategories: {
 export type LogCategory = typeof logCategories[number]['category'];
 export type LogSubCategory<C extends LogCategory> = (typeof logCategories[number] & { category: C })['subCategory'][number];
 
-export type UploaderType = 'screenapp' | 's3';
+export type UploaderType = 'screenapp' | 's3' | 'youtube';

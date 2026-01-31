@@ -156,6 +156,7 @@ export class RedisConsumerService {
           userId: meetingParams.userId,
           eventId: meetingParams.eventId,
           botId: meetingParams.botId,
+          webinarRegistration: meetingParams.webinarRegistration,
           uploader
         };
 

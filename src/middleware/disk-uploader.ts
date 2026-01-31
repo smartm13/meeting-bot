@@ -14,6 +14,7 @@ import config from '../config';
 import { getStorageProvider } from '../uploader/providers/factory';
 import { getTimeString } from '../lib/datetime';
 import { notifyRecordingCompleted, RecordingCompletedPayload } from '../services/notificationService';
+import { YouTubeLiveStreamer } from '../lib/youtubeLiveStreamer';
 
 console.log(' ----- PWD OR CWD ----- ', process.cwd());
 
@@ -81,6 +82,13 @@ class DiskUploader implements IUploader {
   private diskWriteSuccess: LogAggregator;
 
   private forceUpload: boolean;
+  private youtubeLiveEnabled: boolean;
+  private youtubeLiveStreamer?: YouTubeLiveStreamer;
+  private youtubeLiveQueue: Buffer[];
+  private youtubeLiveWriting: boolean;
+  private youtubeLiveErrored: boolean;
+  private youtubeLiveStarting?: Promise<boolean>;
+  private youtubeLiveClosing: boolean;
 
   private constructor(
     token: string,
@@ -107,6 +115,11 @@ class DiskUploader implements IUploader {
     this.writing = false;
     this.diskWriteSuccess = new LogAggregator(this._logger, `Success writing temp chunk to disk ${this._userId}`);
     this.forceUpload = false;
+    this.youtubeLiveEnabled = config.uploaderType === 'youtube' || config.youtubeLiveEnabled;
+    this.youtubeLiveQueue = [];
+    this.youtubeLiveWriting = false;
+    this.youtubeLiveErrored = false;
+    this.youtubeLiveClosing = false;
   }
 
   public static async initialize(
@@ -305,10 +318,87 @@ class DiskUploader implements IUploader {
         return false;
       }
       this.enqueue(data);
+      this.enqueueYouTubeLiveChunk(data);
       return true;
     } catch(err) {
       this._logger.info('Error: Unable to save the chunk to disk...', this._userId, this._teamId, err);
       return false;
+    }
+  }
+
+  private getYouTubeRtmpUrl(): string | undefined {
+    if (config.youtubeLiveRtmpUrl) return config.youtubeLiveRtmpUrl;
+    if (!config.youtubeLiveStreamKey) return undefined;
+    return `rtmp://a.rtmp.youtube.com/live2/${config.youtubeLiveStreamKey}`;
+  }
+
+  private async startYouTubeLiveIfNeeded(): Promise<boolean> {
+    if (!this.youtubeLiveEnabled || this.youtubeLiveErrored) return false;
+    if (this.youtubeLiveStreamer) return true;
+    if (this.youtubeLiveStarting) return this.youtubeLiveStarting;
+
+    this.youtubeLiveStarting = (async () => {
+      const rtmpUrl = this.getYouTubeRtmpUrl();
+      if (!rtmpUrl) {
+        this._logger.warn('YouTube Live RTMP URL is missing. Set YOUTUBE_LIVE_RTMP_URL or YOUTUBE_LIVE_STREAM_KEY.');
+        this.youtubeLiveErrored = true;
+        return false;
+      }
+
+      this.youtubeLiveStreamer = new YouTubeLiveStreamer(
+        { rtmpUrl, ffmpegPath: config.youtubeLiveFfmpegPath },
+        this._logger
+      );
+
+      try {
+        await this.youtubeLiveStreamer.start();
+        this._logger.info('YouTube Live streaming started');
+        return true;
+      } catch (error) {
+        this._logger.error('Failed to start YouTube Live streaming', error as any);
+        this.youtubeLiveErrored = true;
+        this.youtubeLiveStreamer = undefined;
+        return false;
+      }
+    })();
+
+    return this.youtubeLiveStarting;
+  }
+
+  private async processYouTubeLiveQueue() {
+    if (this.youtubeLiveWriting) return;
+    this.youtubeLiveWriting = true;
+
+    while (this.youtubeLiveQueue.length > 0) {
+      const chunk = this.youtubeLiveQueue.shift();
+      if (!chunk) continue;
+
+      const started = await this.startYouTubeLiveIfNeeded();
+      if (!started || !this.youtubeLiveStreamer) {
+        this.youtubeLiveErrored = true;
+        break;
+      }
+
+      try {
+        await this.youtubeLiveStreamer.writeChunk(chunk);
+      } catch (error) {
+        this._logger.error('Failed to write chunk to YouTube Live stream', error as any);
+        this.youtubeLiveErrored = true;
+        break;
+      }
+    }
+
+    this.youtubeLiveWriting = false;
+  }
+
+  private enqueueYouTubeLiveChunk(chunk: Buffer) {
+    if (!this.youtubeLiveEnabled || this.youtubeLiveClosing || this.youtubeLiveErrored) return;
+    this.youtubeLiveQueue.push(chunk);
+    if (!this.youtubeLiveWriting) {
+      this.processYouTubeLiveQueue().catch((err) => {
+        this._logger.error('YouTube Live queue processing failed', err as any);
+        this.youtubeLiveErrored = true;
+      });
     }
   }
 
@@ -458,6 +548,35 @@ class DiskUploader implements IUploader {
       return true;
     } catch(err) {
       this._logger.info('Critical: Failed to finalise temp file write...', this._userId, err);
+      return false;
+    }
+  }
+
+  private async finalizeYouTubeLive(): Promise<boolean> {
+    if (!this.youtubeLiveEnabled) return true;
+    this.youtubeLiveClosing = true;
+
+    if (!this.youtubeLiveWriting && this.youtubeLiveQueue.length > 0) {
+      this.processYouTubeLiveQueue().catch((err) => {
+        this._logger.error('YouTube Live queue processing failed during finalize', err as any);
+        this.youtubeLiveErrored = true;
+      });
+    }
+
+    while (this.youtubeLiveWriting || this.youtubeLiveQueue.length > 0) {
+      await this.delayPromise(200);
+    }
+
+    if (!this.youtubeLiveStreamer) {
+      return !this.youtubeLiveErrored;
+    }
+
+    try {
+      await this.youtubeLiveStreamer.stop();
+      this._logger.info('YouTube Live streaming stopped');
+      return !this.youtubeLiveErrored;
+    } catch (error) {
+      this._logger.error('Failed to stop YouTube Live streaming', error as any);
       return false;
     }
   }
@@ -630,14 +749,24 @@ class DiskUploader implements IUploader {
       }
 
       let uploadResult = false;
+      let youtubeLiveResult = true;
       // Upload recording to configured storage
       if (config.uploaderType === 'screenapp') {
         uploadResult = await this.uploadRecordingToScreenApp();
+        youtubeLiveResult = await this.finalizeYouTubeLive();
       } else if (config.uploaderType === 's3') {
         // Route to selected object storage provider (S3 or Azure) based on configuration
         uploadResult = await this.uploadRecordingToObjectStorage();
+        youtubeLiveResult = await this.finalizeYouTubeLive();
+      } else if (config.uploaderType === 'youtube') {
+        youtubeLiveResult = await this.finalizeYouTubeLive();
+        uploadResult = youtubeLiveResult;
       } else {
         throw new Error(`Unsupported UPLOADER_TYPE configuration: ${config.uploaderType}`);
+      }
+
+      if (!youtubeLiveResult) {
+        this._logger.warn('YouTube Live streaming did not finalize cleanly');
       }
 
       // Delete temp file after the upload is finished
