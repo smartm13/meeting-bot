@@ -221,7 +221,7 @@ export class ZoomBot extends BotBase {
     await this.tryCompleteWebinarRegistration(params);
 
     const attempts = 3;
-    let usingDirectWebClient = false;
+    let usingDirectWebClient: boolean = process.env.ZOOM_USE_DIRECT_WEB_CLIENT === 'true' ? true : false;
     const findAndEnableJoinFromBrowserButton = async (retry: number): Promise<boolean> => {
       try {
         if (retry >= attempts) {
@@ -323,21 +323,29 @@ export class ZoomBot extends BotBase {
       }
     };
 
-    // Join from browser
-    this._logger.info('Waiting for Join from your browser to be visible...');
-    const foundAndClickedJoinFromBrowser = await findAndEnableJoinFromBrowserButton(0);
-    
+    // Join from browser - if initializion parameter is set to use direct web client, then skip this step
+    let foundAndClickedJoinFromBrowser = false;
     let navSuccess = false;
-    if (foundAndClickedJoinFromBrowser) {
-      this._logger.info('Verify the meeting web client is visible...');
-      // Ensure the page has navigated to the web client...
-      navSuccess = await waitForJoinFromBrowserNav();
+    if (!usingDirectWebClient) {
+      this._logger.info('Waiting for Join from your browser to be visible...');
+      foundAndClickedJoinFromBrowser = await findAndEnableJoinFromBrowserButton(0);
+      if (foundAndClickedJoinFromBrowser) {
+        this._logger.info('Verify the meeting web client is visible...');
+        // Ensure the page has navigated to the web client...
+        navSuccess = await waitForJoinFromBrowserNav();
+      }
+    }
+    else {
+      this._logger.info('Using direct web client...');
     }
     
+    
     if (!foundAndClickedJoinFromBrowser || !navSuccess) {
-      await uploadDebugImage(await this.page.screenshot({ type: 'png', fullPage: true }), 'enable-join-from-browser', params.userId, this._logger, params.botId);
-      this._logger.info('Failed to enable Join from your browser button...', params.userId);
-      this._logger.info('Zoom Bot will now attempt to access the Web Client by URL...', params.userId);
+      if (!usingDirectWebClient) {
+        await uploadDebugImage(await this.page.screenshot({ type: 'png', fullPage: true }), 'enable-join-from-browser', params.userId, this._logger, params.botId);
+        this._logger.info('Failed to enable Join from your browser button...', params.userId);
+        this._logger.info('Zoom Bot will now attempt to access the Web Client by URL...', params.userId);
+      }
       const canAccess = await visitWebClientByUrl();
       if (!canAccess) {
         await uploadDebugImage(await this.page.screenshot({ type: 'png', fullPage: true }), 'direct-access-webclient', params.userId, this._logger, params.botId);
