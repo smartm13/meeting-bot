@@ -267,7 +267,7 @@ export class RecordingTask extends Task<null, void> {
         slightlySecretId: this.slightlySecretId,
         activateInactivityDetectionAfterMinutes: config.activateInactivityDetectionAfter,
         activateInactivityDetectionAfter: new Date(new Date().getTime() + config.activateInactivityDetectionAfter * 60 * 1000).toISOString(),
-        primaryMimeType: webmMimeType,
+        primaryMimeType: vp9MimeType,
         secondaryMimeType: vp9MimeType
       }
     );
