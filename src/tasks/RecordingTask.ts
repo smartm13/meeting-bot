@@ -54,6 +54,29 @@ export class RecordingTask extends Task<null, void> {
           await (window as any).screenAppSendData(slightlySecretId, base64);
         };
 
+        const chunkQueue: ArrayBuffer[] = [];
+        let isProcessingQueue = false;
+
+        const processChunkQueue = async () => {
+          if (isProcessingQueue) return;
+          isProcessingQueue = true;
+          while (chunkQueue.length > 0) {
+            const nextChunk = chunkQueue.shift();
+            if (!nextChunk) continue;
+            try {
+              await sendChunkToServer(nextChunk);
+            } catch (error) {
+              console.error('Error uploading chunk:', (error as any)?.message || error);
+            }
+          }
+          isProcessingQueue = false;
+        };
+
+        const enqueueChunk = (chunk: ArrayBuffer) => {
+          chunkQueue.push(chunk);
+          processChunkQueue();
+        };
+
         async function startRecording() {
           console.log('Will activate the inactivity detection after', activateInactivityDetectionAfter);
 
@@ -94,9 +117,9 @@ export class RecordingTask extends Task<null, void> {
             }
             try {
               const arrayBuffer = await event.data.arrayBuffer();
-              await sendChunkToServer(arrayBuffer);
+git stat              enqueueChunk(arrayBuffer);
             } catch (error) {
-              console.error('Error uploading chunk:', error.message, error);
+              console.error('Error uploading chunk:', (error as any)?.message || error);
             }
           };
 
