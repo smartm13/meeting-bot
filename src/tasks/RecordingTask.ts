@@ -117,7 +117,7 @@ export class RecordingTask extends Task<null, void> {
             }
             try {
               const arrayBuffer = await event.data.arrayBuffer();
-git stat              enqueueChunk(arrayBuffer);
+              enqueueChunk(arrayBuffer);
             } catch (error) {
               console.error('Error uploading chunk:', (error as any)?.message || error);
             }
