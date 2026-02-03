@@ -1,15 +1,25 @@
 import { spawn, ChildProcess } from 'child_process';
 import { Logger } from 'winston';
 
+type FFmpegRecorderOptions = {
+  outputToStdout?: boolean;
+  outputFormat?: 'mp4' | 'webm';
+};
+
 export class FFmpegRecorder {
   private ffmpegProcess: ChildProcess | null = null;
-  private outputPath: string;
+  private outputPath: string | null;
   private logger: Logger;
   private exitCallback: ((code: number | null) => void) | null = null;
+  private outputDataCallback: ((chunk: Buffer) => void) | null = null;
+  private outputToStdout: boolean;
+  private outputFormat: 'mp4' | 'webm';
 
-  constructor(outputPath: string, logger: Logger) {
+  constructor(outputPath: string | null, logger: Logger, options?: FFmpegRecorderOptions) {
     this.outputPath = outputPath;
     this.logger = logger;
+    this.outputToStdout = options?.outputToStdout ?? false;
+    this.outputFormat = options?.outputFormat ?? (this.outputToStdout ? 'webm' : 'mp4');
   }
 
   /**
@@ -19,11 +29,25 @@ export class FFmpegRecorder {
     this.exitCallback = callback;
   }
 
+  /**
+   * Register a callback to receive ffmpeg output data
+   */
+  onOutputData(callback: (chunk: Buffer) => void): void {
+    this.outputDataCallback = callback;
+  }
+
   async start(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
+        if (!this.outputToStdout && !this.outputPath) {
+          reject(new Error('FFmpeg outputPath is required when outputToStdout is false'));
+          return;
+        }
+
+        const outputTarget = this.outputToStdout ? 'pipe:1' : this.outputPath!;
+
         // FFmpeg command to capture X11 display and PulseAudio monitor
-        const ffmpegArgs = [
+        const ffmpegArgs: string[] = [
           '-y', // Overwrite output file
           '-loglevel', 'info', // Verbose logging for debugging
 
@@ -39,32 +63,56 @@ export class FFmpegRecorder {
           '-ac', '2',
           '-ar', '44100',
           '-i', 'virtual_output.monitor',
-
-          // Video encoding with better compatibility
-          '-c:v', 'libx264',
-          '-preset', 'faster',
-          '-pix_fmt', 'yuv420p',
-          '-crf', '23',
-          '-g', '50', // Keyframe interval
-          '-threads', '0',
-
-          // Audio encoding
-          '-c:a', 'aac',
-          '-b:a', '128k',
-          '-ar', '44100',
-          '-ac', '2',
-          '-strict', 'experimental',
-
-          // Sync and timing
-          '-vsync', 'cfr',
-          '-async', '1',
-
-          // MP4 optimization
-          '-movflags', '+faststart',
-
-          // Output
-          this.outputPath
         ];
+
+        if (this.outputFormat === 'webm') {
+          ffmpegArgs.push(
+            // Video encoding for WebM (VP8)
+            '-c:v', 'libvpx',
+            '-deadline', 'realtime',
+            '-cpu-used', '5',
+            '-b:v', '1500k',
+            '-g', '50', // Keyframe interval
+            '-threads', '0',
+
+            // Audio encoding for WebM
+            '-c:a', 'libopus',
+            '-b:a', '128k',
+            '-ar', '48000',
+            '-ac', '2',
+
+            // Output format
+            '-f', 'webm',
+            outputTarget
+          );
+        } else {
+          ffmpegArgs.push(
+            // Video encoding with better compatibility
+            '-c:v', 'libx264',
+            '-preset', 'faster',
+            '-pix_fmt', 'yuv420p',
+            '-crf', '23',
+            '-g', '50', // Keyframe interval
+            '-threads', '0',
+
+            // Audio encoding
+            '-c:a', 'aac',
+            '-b:a', '128k',
+            '-ar', '44100',
+            '-ac', '2',
+            '-strict', 'experimental',
+
+            // Sync and timing
+            '-vsync', 'cfr',
+            '-async', '1',
+
+            // MP4 optimization
+            '-movflags', '+faststart',
+
+            // Output
+            outputTarget
+          );
+        }
 
         this.logger.info('Starting ffmpeg with args:', { args: ffmpegArgs.join(' ') });
 
@@ -88,9 +136,17 @@ export class FFmpegRecorder {
         });
 
         // Handle stdout
-        this.ffmpegProcess.stdout?.on('data', (data) => {
-          this.logger.debug('ffmpeg stdout:', data.toString());
-        });
+        if (this.outputToStdout) {
+          this.ffmpegProcess.stdout?.on('data', (data) => {
+            if (this.outputDataCallback) {
+              this.outputDataCallback(data as Buffer);
+            }
+          });
+        } else {
+          this.ffmpegProcess.stdout?.on('data', (data) => {
+            this.logger.debug('ffmpeg stdout:', data.toString());
+          });
+        }
 
         // Buffer to accumulate stderr for better error reporting
         let stderrBuffer = '';

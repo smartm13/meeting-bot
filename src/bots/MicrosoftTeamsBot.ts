@@ -13,8 +13,6 @@ import createBrowserContext from '../lib/chromium';
 import { browserLogCaptureCallback } from '../util/logger';
 import { MICROSOFT_REQUEST_DENIED } from '../constants';
 import { FFmpegRecorder } from '../lib/ffmpegRecorder';
-import * as path from 'path';
-import * as fs from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -405,11 +403,46 @@ export class MicrosoftTeamsBot extends MeetBotBase {
     const duration = config.maxRecordingDuration * 60 * 1000;
     this._logger.info(`Recording max duration set to ${duration / 60000} minutes (safety limit only)`);
 
-    // Use the same temp folder as Google Meet bot (has proper permissions)
-    const tempFolder = path.join(process.cwd(), 'dist', '_tempvideo');
-    const outputPath = path.join(tempFolder, `recording-${botId || Date.now()}.mp4`);
+    const outputLabel = `recording-${botId || Date.now()}.webm (stdout)`;
+    this._logger.info('Starting ffmpeg recording...', { output: outputLabel, duration });
 
-    this._logger.info('Starting ffmpeg recording...', { outputPath, duration });
+    const uploadQueue: Buffer[] = [];
+    let uploadInProgress = false;
+    let uploadDrainPromise: Promise<void> | null = null;
+    let uploadFailed = false;
+
+    const processUploadQueue = async () => {
+      if (uploadInProgress) return;
+      uploadInProgress = true;
+      while (uploadQueue.length > 0) {
+        const chunk = uploadQueue.shift();
+        if (!chunk) continue;
+        try {
+          await uploader.saveDataToTempFile(chunk);
+        } catch (error) {
+          this._logger.error('Failed to stream chunk to uploader', { error });
+          uploadFailed = true;
+        }
+      }
+      uploadInProgress = false;
+    };
+
+    const enqueueUploadChunk = (chunk: Buffer) => {
+      uploadQueue.push(chunk);
+      if (!uploadInProgress) {
+        uploadDrainPromise = processUploadQueue();
+      }
+    };
+
+    const waitForUploadDrain = async () => {
+      if (uploadInProgress && uploadDrainPromise) {
+        await uploadDrainPromise;
+        return;
+      }
+      if (uploadQueue.length > 0) {
+        await processUploadQueue();
+      }
+    };
 
     // Verify PulseAudio is ready before starting FFmpeg
     this._logger.info('Verifying PulseAudio status before starting FFmpeg...');
@@ -473,7 +506,11 @@ export class MicrosoftTeamsBot extends MeetBotBase {
     }
 
     // Create and start ffmpeg recorder
-    const recorder = new FFmpegRecorder(outputPath, this._logger);
+    const recorder = new FFmpegRecorder(null, this._logger, {
+      outputToStdout: true,
+      outputFormat: 'webm',
+    });
+    recorder.onOutputData((chunk) => enqueueUploadChunk(chunk));
 
     // Track FFmpeg status
     let ffmpegFailed = false;
@@ -654,21 +691,8 @@ export class MicrosoftTeamsBot extends MeetBotBase {
       this._logger.info('Stopping ffmpeg recording...');
       await recorder.stop();
 
-      // Upload the recorded file
-      this._logger.info('Uploading recorded file...', { outputPath });
-
-      let uploadSuccess = false;
-      if (fs.existsSync(outputPath)) {
-        const fileBuffer = fs.readFileSync(outputPath);
-        await uploader.saveDataToTempFile(fileBuffer);
-
-        // Clean up the temporary file
-        fs.unlinkSync(outputPath);
-        this._logger.info('Recording uploaded and temporary file cleaned up');
-        uploadSuccess = true;
-      } else {
-        this._logger.error('Recording file not found!', { outputPath });
-      }
+      await waitForUploadDrain();
+      const uploadSuccess = !uploadFailed;
 
       // Close browser
       this._logger.info('Closing the browser...');
