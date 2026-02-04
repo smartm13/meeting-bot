@@ -1,0 +1,25 @@
+env:
+  # MAX_RECORDING_DURATION_MINUTES: "360"
+  # MEETING_INACTIVITY_MINUTES: "30"
+  # INACTIVITY_DETECTION_START_DELAY_MINUTES: "10"
+  UPLOADER_FILE_EXTENSION: "mkv"
+  ZOOM_USE_DIRECT_WEB_CLIENT: "true"
+  YOUTUBE_LIVE_ENABLED: "true"
+  UPLOADER_TYPE: "youtube"
+  # YOUTUBE_LIVE_STREAM_KEY: "xxx"
+jobs:
+  - provider: zoom
+    payload:
+      bearerToken: your-auth-token-not-needed
+      url: https://zoom.us/j/<meeting_id>?pwd=<passcode>
+      name: Meeting Notetaker
+      teamId: team123
+      timezone: UTC
+      userId: user123
+      botId: bot-uuid
+      # below is optional and only needed if the meeting is a webinar
+      webinarRegistration:
+        firstName: <First Name>
+        lastName: <Last Name>
+        email: <Email>
+        phone: <Phone>

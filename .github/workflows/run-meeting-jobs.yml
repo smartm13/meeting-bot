@@ -1,0 +1,26 @@
+name: Run Meeting Jobs
+
+on:
+  push:
+    branches:
+      - '_JOB_RUN_*'
+    paths:
+      - meeting-jobs.yml
+
+jobs:
+  run_meeting_jobs:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref_name, '_JOB_RUN_')
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build meeting bot image
+        run: docker build -f Dockerfile.production -t meetbot-ci .
+
+      - name: Run meeting jobs
+        run: >
+          docker run --rm
+          -v "${{ github.workspace }}/meeting-jobs.yml:/usr/src/app/meeting-jobs.yml:ro"
+          --env YOUTUBE_LIVE_STREAM_KEY="${{ secrets.YOUTUBE_LIVE_STREAM_KEY }}"
+          meetbot-ci node dist/cli/run-meeting-jobs.js

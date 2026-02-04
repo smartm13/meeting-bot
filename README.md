@@ -125,6 +125,42 @@ Content-Type: application/json
 }
 ```
 
+### GitHub Actions File-Triggered Jobs
+
+This repo supports a file-based workflow for GitHub Actions. When `meeting-jobs.yml` changes on a branch matching `_JOB_RUN_.*`, the runner builds the Docker image and executes the jobs inside CI.
+
+`meeting-jobs.yml` schema:
+- `env`: key/value map of environment variables that will be applied to the bot process for this run.
+- `jobs`: array of job entries with `provider` and `payload` matching the REST join endpoints.
+
+Example (see the full file at `meeting-jobs.yml`):
+```yaml
+env:
+  MAX_RECORDING_DURATION_MINUTES: "360"
+  UPLOADER_TYPE: "youtube"
+jobs:
+  - provider: google
+    payload:
+      bearerToken: your-auth-token
+      url: https://meet.google.com/abc-defg-hij
+      name: Meeting Notetaker
+      teamId: team123
+      timezone: UTC
+      userId: user123
+      botId: bot-uuid
+```
+
+Local run (starts the bot and runs jobs sequentially):
+```bash
+npm run run-jobs
+```
+
+CI details:
+- `.github/workflows/run-meeting-jobs.yml` triggers only on `meeting-jobs.yml` changes and branch names matching `_JOB_RUN_.*`.
+- For secrets (GCP, S3, etc), add GitHub Actions secrets and pass them into `docker run` inside the workflow with `--env` entries.
+- Set `MEETING_JOBS_START_SERVER=false` to skip starting the server if you already run it elsewhere.
+- Use `MEETING_BOT_BASE_URL` to point the CLI at a different server.
+
 ### Recording Completion Notifications (Optional)
 
 You can configure Meeting Bot to notify external systems when a recording has finished and is ready. Two channels are supported:
