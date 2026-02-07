@@ -11,15 +11,15 @@ jobs:
   - provider: zoom
     payload:
       bearerToken: your-auth-token-not-needed
-      url: https://zoom.us/j/<meeting_id>?pwd=<passcode>
-      name: Meeting Notetaker
+      url: https://zoom.us/j/94452975351
+      name: Meet N
       teamId: team123
       timezone: UTC
       userId: user123
       botId: bot-uuid
       # below is optional and only needed if the meeting is a webinar
       webinarRegistration:
-        firstName: <First Name>
-        lastName: <Last Name>
-        email: <Email>
-        phone: <Phone>
+        firstName: Ram
+        lastName: L
+        email: mail@me.co
+        phone: 976838272
