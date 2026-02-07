@@ -11,7 +11,7 @@ jobs:
   - provider: zoom
     payload:
       bearerToken: your-auth-token-not-needed
-      url: https://zoom.us/j/94452975351
+      url: https://zoom.us/j/89441174432?pwd=en2ueKknOyLti09OCNxXQL8euDlx4K.1
       name: Meet
       teamId: team123
       timezone: UTC
