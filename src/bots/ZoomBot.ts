@@ -116,6 +116,26 @@ export class ZoomBot extends BotBase {
     return false;
   }
 
+  private async hasVisibleRecaptchaValidator(): Promise<boolean> {
+    const selectors = [
+      'div.g-recaptcha',
+      'div#recaptcha',
+      'div[class*="recaptcha"]',
+      'div.recaptcha-checkbox',
+      'iframe[src*="recaptcha"]',
+      'iframe[title*="recaptcha"]',
+      'textarea#g-recaptcha-response',
+    ];
+    const locator = this.page.locator(selectors.join(','));
+    const count = await locator.count();
+    for (let i = 0; i < count; i += 1) {
+      const candidate = locator.nth(i);
+      const isVisible = await candidate.isVisible().catch(() => false);
+      if (isVisible) return true;
+    }
+    return false;
+  }
+
   private async tryCompleteWebinarRegistration(params: JoinParams): Promise<boolean> {
     const firstNameInput = await this.findVisibleInput([
       'input#question_first_name',
@@ -173,6 +193,14 @@ export class ZoomBot extends BotBase {
     if (lastNameInput && details.lastName) await lastNameInput.fill(details.lastName);
     if (emailInput && details.email) await emailInput.fill(details.email);
     if (phoneInput && details.phone) await phoneInput.fill(details.phone);
+
+    if (await this.hasVisibleRecaptchaValidator()) {
+      this._logger.error('Visible reCAPTCHA detected on webinar registration; skipping submit and exiting job', {
+        userId: params.userId,
+        botId: params.botId,
+      });
+      throw new Error('Visible reCAPTCHA detected on webinar registration');
+    }
 
     const submitted = await this.clickWebinarRegisterButton();
     if (!submitted) {
